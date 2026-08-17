@@ -59,6 +59,21 @@ public one is the address a site would record. Whether either is a problem
 depends on what the reader expected to be visible, which is a question about
 their session and not about this function.
 
+**An empty `ips` with `supported: true` is a normal, and usually good, result.**
+Chrome and Firefox now hand out an mDNS hostname — `8f3c….local` — in place of
+the private address, which is the browser deliberately withholding it. There is
+no address to report in that case, and this returns nothing rather than passing
+the hostname off as one.
+
+## Versions
+
+`1.0.0` and `1.0.1` returned fragments such as `e:2703186080` instead of
+addresses. The pattern they matched on, `[a-f0-9:]{10,}`, hits the foundation
+field inside the word `candidate:2703186080` before ever reaching the address —
+`e` is a hex digit and the digits after the colon are too. `1.0.2` reads the
+connection-address field by position, the way RFC 5245 fixes it, and validates
+what it finds. Use `1.0.2` or later.
+
 ## The rest of it
 
 Made by [MyIPScan](https://myipscan.net) — browser privacy checks that run

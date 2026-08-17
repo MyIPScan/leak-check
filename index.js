@@ -15,7 +15,46 @@
 // the caller may well want to point this at their own.
 var DEFAULT_STUN = ["stun:stun.l.google.com:19302"];
 
-var IP = /([0-9]{1,3}(\.[0-9]{1,3}){3}|[a-f0-9:]{10,})/i;
+/**
+ * Is this string an IP address, structurally.
+ *
+ * Structure rather than a character class, because a character class is what
+ * 1.0.0 and 1.0.1 shipped and it was wrong: /[a-f0-9:]{10,}/ matches
+ * "e:2703186080" inside the word "candidate:2703186080", since "e" is a hex
+ * digit and the foundation that follows is decimal. Every reading came back as
+ * that fragment, and the real address - five fields further along - was never
+ * reached.
+ */
+function isIp(s) {
+  if (!s) return false;
+  var v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  if (v4) {
+    for (var i = 1; i <= 4; i++) {
+      if (Number(v4[i]) > 255) return false;
+    }
+    return true;
+  }
+  if (s.indexOf(":") === -1) return false;
+  // IPv6: eight groups, or fewer with exactly one "::" standing in for the rest.
+  var runs = s.split("::");
+  if (runs.length > 2) return false;
+  var groups = s.split(":").filter(function (g) { return g !== ""; });
+  if (groups.length > 8 || (runs.length === 1 && groups.length !== 8)) return false;
+  return groups.every(function (g) { return /^[0-9a-f]{1,4}$/i.test(g); });
+}
+
+/**
+ * The connection address out of an ICE candidate line.
+ *
+ * RFC 5245 fixes the field order: candidate:<foundation> <component> <transport>
+ * <priority> <address> <port> typ <type> ... so the address is field five, and
+ * reading it by position cannot pick up part of another field.
+ */
+function addressOf(candidate) {
+  if (candidate && candidate.address) return candidate.address;      // browsers expose it directly
+  var parts = String(candidate && candidate.candidate || "").split(" ");
+  return parts.length > 4 ? parts[4] : "";
+}
 
 /**
  * @param {number|{timeoutMs?: number, stunUrls?: string[]}} [options]
@@ -61,8 +100,13 @@ function detectWebRTCLeak(options) {
       // A null candidate is the browser saying it has finished gathering, so
       // there is no reason to sit out the rest of the timeout.
       if (!e.candidate) return finish();
-      var m = IP.exec(e.candidate.candidate);
-      if (m) ips.add(m[1]);
+      var addr = addressOf(e.candidate);
+      // Chrome and Firefox hand out an mDNS name like 8f3c-....local instead of
+      // the private address by default - that IS the browser withholding it, so
+      // there is nothing to report, and reporting the hostname as an "IP" would
+      // be worse than reporting nothing.
+      if (/\.local$/i.test(addr)) return;
+      if (isIp(addr)) ips.add(addr);
     };
     pc.createOffer()
       .then(function (o) { return pc.setLocalDescription(o); })
