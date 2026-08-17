@@ -1,0 +1,10 @@
+{
+  "name": "@myipscan/leak-check",
+  "version": "1.0.0",
+  "description": "Tiny browser-side WebRTC local IP leak detector. By MyIPScan.",
+  "main": "index.js",
+  "homepage": "https://myipscan.net",
+  "keywords": ["webrtc", "leak", "privacy", "dns-leak", "ip", "vpn", "security"],
+  "author": "MyIPScan (https://myipscan.net)",
+  "license": "MIT"
+}
