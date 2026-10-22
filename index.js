@@ -46,9 +46,10 @@ function isIp(s) {
 /**
  * The connection address out of an ICE candidate line.
  *
- * RFC 5245 fixes the field order: candidate:<foundation> <component> <transport>
- * <priority> <address> <port> typ <type> ... so the address is field five, and
- * reading it by position cannot pick up part of another field.
+ * RFC 8839 (section 5.1, the candidate-attribute grammar) fixes the field order:
+ * candidate:<foundation> <component> <transport> <priority> <address> <port>
+ * typ <type> ... so the address is field five, and reading it by position cannot
+ * pick up part of another field.
  */
 function addressOf(candidate) {
   if (candidate && candidate.address) return candidate.address;      // browsers expose it directly
@@ -59,9 +60,16 @@ function addressOf(candidate) {
 /**
  * @param {number|{timeoutMs?: number, stunUrls?: string[]}} [options]
  *        A number is read as timeoutMs, so detectWebRTCLeak(3000) works.
- * @returns {Promise<{supported: boolean, ips: string[]}>}
- *        `supported: false` means the check could not run at all - no browser,
- *        or a browser without WebRTC. It never means "no leak found".
+ * @returns {Promise<{supported: boolean, complete: boolean,
+ *          status: "complete"|"incomplete"|"error"|"unsupported", ips: string[], error?: string}>}
+ *        status "complete": the browser finished gathering candidates; `ips` is
+ *          everything it was willing to reveal.
+ *        status "incomplete": the timeout ran out before gathering finished; `ips`
+ *          holds what arrived so far and an empty list proves nothing.
+ *        status "error": WebRTC exists but creating the offer failed
+ *          (createOffer/setLocalDescription threw); `supported` is false.
+ *        status "unsupported": no browser, or a browser without WebRTC.
+ *        `supported: false` never means "no leak found".
  */
 function detectWebRTCLeak(options) {
   var opts = typeof options === "number" ? { timeoutMs: options } : (options || {});
@@ -74,32 +82,45 @@ function detectWebRTCLeak(options) {
     // where `window` does not exist - and it throws from inside a Promise, so
     // it surfaces as an unhandled rejection rather than as a clear error.
     if (typeof window === "undefined") {
-      return resolve({ supported: false, ips: [] });
+      return resolve({ supported: false, complete: false, status: "unsupported", ips: [] });
     }
     var RTC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
-    if (!RTC) return resolve({ supported: false, ips: [] });
+    if (!RTC) return resolve({ supported: false, complete: false, status: "unsupported", ips: [] });
 
     var ips = new Set();
     var pc;
     try {
       pc = new RTC({ iceServers: [{ urls: stunUrls }] });
     } catch (e) {
-      return resolve({ supported: false, ips: [] });
+      return resolve({ supported: false, complete: false, status: "unsupported", ips: [] });
     }
 
     var done = false;
-    function finish() {
+    var timer = null;
+    // Up to 1.0.3 a failed offer and a timeout both resolved as supported:true
+    // with whatever had arrived - usually nothing - which read exactly like
+    // "the browser revealed nothing". Each ending now says which one it was.
+    function finish(status, error) {
       if (done) return;
       done = true;
+      if (timer !== null) clearTimeout(timer);
       try { pc.close(); } catch (e) { /* already closed */ }
-      resolve({ supported: true, ips: Array.from(ips) });
+      if (status === "error") {
+        return resolve({ supported: false, complete: false, status: "error", ips: [],
+          error: error && error.message ? error.message : String(error || "createOffer failed") });
+      }
+      resolve({ supported: true, complete: status === "complete", status: status, ips: Array.from(ips) });
     }
 
-    pc.createDataChannel("");
+    try {
+      pc.createDataChannel("");
+    } catch (e) {
+      return finish("error", e);
+    }
     pc.onicecandidate = function (e) {
       // A null candidate is the browser saying it has finished gathering, so
       // there is no reason to sit out the rest of the timeout.
-      if (!e.candidate) return finish();
+      if (!e.candidate) return finish("complete");
       var addr = addressOf(e.candidate);
       // Chrome and Firefox hand out an mDNS name like 8f3c-....local instead of
       // the private address by default - that IS the browser withholding it, so
@@ -108,11 +129,10 @@ function detectWebRTCLeak(options) {
       if (/\.local$/i.test(addr)) return;
       if (isIp(addr)) ips.add(addr);
     };
+    timer = setTimeout(function () { finish("incomplete"); }, timeoutMs);
     pc.createOffer()
       .then(function (o) { return pc.setLocalDescription(o); })
-      .catch(finish);
-
-    setTimeout(finish, timeoutMs);
+      .catch(function (err) { finish("error", err); });
   });
 }
 

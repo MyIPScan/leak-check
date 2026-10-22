@@ -10,10 +10,16 @@ npm install @myipscan/leak-check
 ```js
 const { detectWebRTCLeak } = require("@myipscan/leak-check");
 
-const { supported, ips } = await detectWebRTCLeak();
-// supported: false  -> the check could not run (no browser, or no WebRTC)
+const { status, ips } = await detectWebRTCLeak();
+// status: "complete"    -> the browser finished gathering; ips is what it revealed
+//         "incomplete"  -> the timeout ran out first; ips is partial, empty proves nothing
+//         "error"       -> WebRTC exists but creating the offer failed (supported: false)
+//         "unsupported" -> no browser, or no WebRTC (supported: false)
 // ips: ["192.168.1.24", "203.0.113.7"]
 ```
+
+The result also carries `supported` (false for "error" and "unsupported") and
+`complete` (true only for "complete"), so code written for 1.0.x keeps working.
 
 ## Why this is not something a VPN fixes
 
@@ -46,10 +52,10 @@ is a fair thing to object to; point it at your own if you would rather.
 - Stores nothing. No cookies, no localStorage, no telemetry.
 - No dependencies, so nothing else comes along with it.
 - Resolves early once the browser finishes gathering candidates, rather than
-  always waiting out the timeout.
-- Returns `{ supported: false }` under server-side rendering and in test runners
-  instead of throwing. That state means the check could not run — never that
-  nothing was found.
+  always waiting out the timeout, and clears its timer when it does.
+- Returns `{ supported: false, status: "unsupported" }` under server-side
+  rendering and in test runners instead of throwing. That state means the check
+  could not run — never that nothing was found.
 
 ## Interpreting the result
 
@@ -59,11 +65,17 @@ public one is the address a site would record. Whether either is a problem
 depends on what the reader expected to be visible, which is a question about
 their session and not about this function.
 
-**An empty `ips` with `supported: true` is a normal, and usually good, result.**
-Chrome and Firefox now hand out an mDNS hostname — `8f3c….local` — in place of
-the private address, which is the browser deliberately withholding it. There is
-no address to report in that case, and this returns nothing rather than passing
-the hostname off as one.
+Read an empty `ips` together with `status`:
+
+- `status: "complete"` — the browser finished gathering and revealed no IP
+  address. Chrome and Firefox hand out an mDNS hostname — `8f3c….local` — in
+  place of the private address; this returns nothing rather than passing the
+  hostname off as an address.
+- `status: "incomplete"` — gathering did not finish before `timeoutMs`. The list
+  may simply not have arrived yet; retry with a longer timeout before drawing any
+  conclusion.
+- `status: "error"` — the check did not run (for example a policy or extension
+  blocked `createOffer`). Nothing can be said about leaks.
 
 ## Versions
 
@@ -71,8 +83,13 @@ the hostname off as one.
 addresses. The pattern they matched on, `[a-f0-9:]{10,}`, hits the foundation
 field inside the word `candidate:2703186080` before ever reaching the address —
 `e` is a hex digit and the digits after the colon are too. `1.0.2` reads the
-connection-address field by position, the way RFC 5245 fixes it, and validates
-what it finds. Use `1.0.2` or later.
+connection-address field by position, the way RFC 8839 (section 5.1) fixes it,
+and validates what it finds. Use `1.0.2` or later.
+
+`1.0.4` stops reporting a timeout or a failed offer as a finished check: up to
+`1.0.3` both resolved `supported: true` with an empty list, which read the same
+as "the browser revealed nothing". The new `status` field says which ending it
+was.
 
 ## The rest of it
 
