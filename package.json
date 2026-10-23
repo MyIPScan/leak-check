@@ -6,10 +6,10 @@
   "homepage": "https://myipscan.net",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/uazik-sys/leak-check.git"
+    "url": "git+https://github.com/MyIPScan/leak-check.git"
   },
   "bugs": {
-    "url": "https://github.com/uazik-sys/leak-check/issues"
+    "url": "https://github.com/MyIPScan/leak-check/issues"
   },
   "keywords": [
     "webrtc",
